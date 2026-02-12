@@ -1,0 +1,525 @@
+#!/usr/bin/env python3
+"""
+hd: minimal Hardware-OS CLI.
+
+Implements a small, dependency-light subset of the workflow documented in
+chat_history.md:
+  - hd init <dir>
+  - hd validate <manifest.json|project_dir>
+
+Design goals:
+  - no external deps required (jsonschema is optional if installed)
+  - deterministic validation errors
+  - supports JSON Canvas style layers (nodes/edges with fromNode/toNode)
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+
+
+ZERO_HASH = "0" * 64
+
+
+def _eprint(*a: object) -> None:
+    print(*a, file=sys.stderr)
+
+
+def _read_json(path: Path) -> Any:
+    with path.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _write_json(path: Path, data: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, sort_keys=True)
+        f.write("\n")
+
+
+def _canonical_json_bytes(obj: Any) -> bytes:
+    # Stable across runs and platforms for hashing.
+    s = json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return s.encode("utf-8")
+
+
+def _sha256_hex(b: bytes) -> str:
+    return hashlib.sha256(b).hexdigest()
+
+
+@dataclass
+class ValidationIssue:
+    kind: str  # "error" | "warning"
+    msg: str
+
+
+class HDValidator:
+    # Minimal dependency order. Extensible later.
+    LAYER_DEPENDENCIES: Dict[str, List[str]] = {
+        "geometry": [],
+        "power": ["geometry"],
+        "signal": ["power"],
+        "runtime": ["signal"],
+        "history": [],
+    }
+
+    def __init__(self, manifest_path: Path, strict: bool = False) -> None:
+        self.manifest_path = manifest_path
+        self.strict = strict
+        self.issues: List[ValidationIssue] = []
+        self.layers: Dict[str, Dict[str, Any]] = {}
+        self.manifest: Dict[str, Any] = {}
+
+    def error(self, msg: str) -> None:
+        self.issues.append(ValidationIssue("error", msg))
+
+    def warn(self, msg: str) -> None:
+        self.issues.append(ValidationIssue("warning", msg))
+
+    def load_manifest(self) -> None:
+        if not self.manifest_path.exists():
+            self.error(f"manifest not found: {self.manifest_path}")
+            return
+        try:
+            obj = _read_json(self.manifest_path)
+        except Exception as e:
+            self.error(f"failed to parse manifest JSON: {self.manifest_path}: {e}")
+            return
+        if not isinstance(obj, dict):
+            self.error("manifest must be a JSON object")
+            return
+        self.manifest = obj
+
+    def _manifest_layers(self) -> List[Dict[str, Any]]:
+        layers = self.manifest.get("layers", [])
+        if not isinstance(layers, list) or not layers:
+            self.error("manifest.layers must be a non-empty array")
+            return []
+        out: List[Dict[str, Any]] = []
+        for i, ent in enumerate(layers):
+            if not isinstance(ent, dict):
+                self.error(f"manifest.layers[{i}] must be an object")
+                continue
+            layer_id = ent.get("layerId")
+            file_ = ent.get("file")
+            if not isinstance(layer_id, str) or not layer_id:
+                self.error(f"manifest.layers[{i}].layerId must be a non-empty string")
+                continue
+            if not isinstance(file_, str) or not file_:
+                self.error(f"manifest.layers[{i}].file must be a non-empty string")
+                continue
+            out.append(ent)
+        return out
+
+    def load_layers(self) -> None:
+        root = self.manifest_path.parent
+        for ent in self._manifest_layers():
+            layer_id = ent["layerId"]
+            layer_file = root / ent["file"]
+            if not layer_file.exists():
+                self.error(f"layer file not found: {layer_id}: {layer_file}")
+                continue
+            try:
+                layer_obj = _read_json(layer_file)
+            except Exception as e:
+                self.error(f"failed to parse layer JSON: {layer_id}: {layer_file}: {e}")
+                continue
+            if not isinstance(layer_obj, dict):
+                self.error(f"layer must be a JSON object: {layer_id}: {layer_file}")
+                continue
+            self.layers[layer_id] = layer_obj
+
+    def validate_layer_dependencies(self) -> None:
+        present = set(self.layers.keys())
+        for layer_id, deps in self.LAYER_DEPENDENCIES.items():
+            if layer_id not in present:
+                continue
+            for dep in deps:
+                if dep not in present:
+                    self.error(f"layer dependency missing: {layer_id} depends on {dep}")
+
+    def _extract_canvas_nodes_edges(
+        self, layer_id: str, layer_obj: Dict[str, Any]
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        nodes = layer_obj.get("nodes")
+        edges = layer_obj.get("edges")
+        if not isinstance(nodes, list):
+            self.error(f"{layer_id}: nodes must be an array (JSON Canvas style)")
+            return ([], [])
+        if not isinstance(edges, list):
+            self.error(f"{layer_id}: edges must be an array (JSON Canvas style)")
+            return (nodes, [])
+        nn: List[Dict[str, Any]] = []
+        ee: List[Dict[str, Any]] = []
+        for i, n in enumerate(nodes):
+            if not isinstance(n, dict):
+                self.error(f"{layer_id}: nodes[{i}] must be an object")
+                continue
+            nn.append(n)
+        for i, e in enumerate(edges):
+            if not isinstance(e, dict):
+                self.error(f"{layer_id}: edges[{i}] must be an object")
+                continue
+            ee.append(e)
+        return (nn, ee)
+
+    def validate_layers(self) -> None:
+        # Validate each layer as a graph.
+        for layer_id, layer_obj in self.layers.items():
+            nodes, edges = self._extract_canvas_nodes_edges(layer_id, layer_obj)
+
+            # Node IDs
+            ids: List[str] = []
+            for i, n in enumerate(nodes):
+                nid = n.get("id")
+                if not isinstance(nid, str) or not nid:
+                    self.error(f"{layer_id}: nodes[{i}].id must be a non-empty string")
+                    continue
+                ids.append(nid)
+            dupes = sorted({x for x in ids if ids.count(x) > 1})
+            if dupes:
+                self.error(f"{layer_id}: duplicate node ids: {', '.join(dupes)}")
+
+            idset = set(ids)
+            # Edge endpoints
+            for i, e in enumerate(edges):
+                a = e.get("fromNode")
+                b = e.get("toNode")
+                if not isinstance(a, str) or not isinstance(b, str) or not a or not b:
+                    self.error(
+                        f"{layer_id}: edges[{i}] must have fromNode/toNode non-empty strings"
+                    )
+                    continue
+                if a not in idset:
+                    self.error(f"{layer_id}: edges[{i}].fromNode references missing node: {a}")
+                if b not in idset:
+                    self.error(f"{layer_id}: edges[{i}].toNode references missing node: {b}")
+
+        # Cross-layer constraint: non-geometry nodes must exist in geometry.
+        if "geometry" in self.layers:
+            geo_nodes, _ = self._extract_canvas_nodes_edges("geometry", self.layers["geometry"])
+            geo_ids = {n.get("id") for n in geo_nodes if isinstance(n.get("id"), str)}
+            for layer_id, layer_obj in self.layers.items():
+                if layer_id == "geometry":
+                    continue
+                nodes, _ = self._extract_canvas_nodes_edges(layer_id, layer_obj)
+                for i, n in enumerate(nodes):
+                    nid = n.get("id")
+                    if isinstance(nid, str) and nid and nid not in geo_ids:
+                        self.error(
+                            f"cross-layer: node {nid} in {layer_id} not found in geometry layer"
+                        )
+
+    def validate_history(self) -> None:
+        hist = self.manifest.get("history")
+        if hist is None:
+            # Allowed for now (not every project has history), but strict mode rejects.
+            if self.strict:
+                self.error("manifest.history is required in --strict mode")
+            return
+
+        if not isinstance(hist, dict):
+            self.error("manifest.history must be an object")
+            return
+        file_ = hist.get("file")
+        if not isinstance(file_, str) or not file_:
+            self.error("manifest.history.file must be a non-empty string")
+            return
+
+        path = self.manifest_path.parent / file_
+        if not path.exists():
+            self.error(f"history file not found: {path}")
+            return
+
+        prev = ZERO_HASH
+        line_no = 0
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                for raw in f:
+                    line_no += 1
+                    s = raw.strip()
+                    if not s:
+                        continue
+                    try:
+                        ev = json.loads(s)
+                    except Exception as e:
+                        self.error(f"history: invalid JSON at {path}:{line_no}: {e}")
+                        continue
+                    if not isinstance(ev, dict):
+                        self.error(f"history: event must be an object at {path}:{line_no}")
+                        continue
+
+                    h = ev.get("hash")
+                    ph = ev.get("prev_hash")
+                    if not isinstance(h, str) or len(h) != 64:
+                        self.error(f"history: missing/invalid hash at {path}:{line_no}")
+                        continue
+                    if not isinstance(ph, str) or len(ph) != 64:
+                        self.error(f"history: missing/invalid prev_hash at {path}:{line_no}")
+                        continue
+                    if ph != prev:
+                        self.error(
+                            f"history: prev_hash mismatch at {path}:{line_no}: got {ph} expected {prev}"
+                        )
+
+                    # Compute expected hash over event excluding "hash".
+                    ev_for_hash = dict(ev)
+                    ev_for_hash.pop("hash", None)
+                    expected = _sha256_hex(_canonical_json_bytes(ev_for_hash))
+                    if expected != h:
+                        self.error(
+                            f"history: hash mismatch at {path}:{line_no}: got {h} expected {expected}"
+                        )
+                    prev = h
+        except Exception as e:
+            self.error(f"failed to read history: {path}: {e}")
+
+    def validate_optional_jsonschema(self) -> None:
+        # Optional: if jsonschema is installed and local schemas exist, validate manifest.
+        # This is a best-effort check (warning on schema load failures).
+        schema_path = Path(__file__).resolve().parent.parent / "schemas" / "kernel" / "manifest-schema.json"
+        if not schema_path.exists():
+            return
+        try:
+            import jsonschema  # type: ignore
+        except Exception:
+            return
+        try:
+            schema = _read_json(schema_path)
+        except Exception as e:
+            self.warn(f"jsonschema: failed to load manifest schema: {schema_path}: {e}")
+            return
+        try:
+            jsonschema.validate(instance=self.manifest, schema=schema)
+        except Exception as e:
+            # Keep this as an error in strict mode; warning otherwise to avoid hard dep.
+            if self.strict:
+                self.error(f"jsonschema: manifest failed schema validation: {e}")
+            else:
+                self.warn(f"jsonschema: manifest failed schema validation: {e}")
+
+    def run(self) -> bool:
+        self.load_manifest()
+        if any(i.kind == "error" for i in self.issues):
+            return False
+
+        self.validate_optional_jsonschema()
+        self.load_layers()
+        self.validate_layer_dependencies()
+        self.validate_layers()
+        self.validate_history()
+        return not any(i.kind == "error" for i in self.issues)
+
+
+def _format_issues(issues: List[ValidationIssue], fmt: str) -> str:
+    if fmt == "json":
+        return json.dumps(
+            [{"kind": i.kind, "message": i.msg} for i in issues], indent=2, sort_keys=True
+        )
+    if fmt == "github":
+        # GitHub Actions annotation format.
+        # We don't always have file/line info, so use generic ::error/::warning.
+        lines: List[str] = []
+        for i in issues:
+            tag = "error" if i.kind == "error" else "warning"
+            lines.append(f"::{tag}::{i.msg}")
+        return "\n".join(lines)
+    # text
+    lines = []
+    for i in issues:
+        pfx = "ERROR" if i.kind == "error" else "WARN"
+        lines.append(f"{pfx}: {i.msg}")
+    return "\n".join(lines)
+
+
+def cmd_validate(args: argparse.Namespace) -> int:
+    target = Path(args.target)
+    if target.is_dir():
+        manifest_path = target / "manifest.json"
+    else:
+        manifest_path = target
+
+    v = HDValidator(manifest_path=manifest_path, strict=args.strict)
+    ok = v.run()
+
+    # If no issues, still emit a short success line in text mode for humans.
+    if v.issues:
+        out = _format_issues(v.issues, args.format)
+        print(out)
+    else:
+        if args.format == "json":
+            print("[]")
+        elif args.format == "github":
+            # no annotations on success
+            pass
+        else:
+            print("ISOMORPHIC ✓")
+
+    return 0 if ok else 1
+
+
+def cmd_replay(args):
+    target = Path(args.target)
+    if target.is_dir():
+        manifest_path = target / "manifest.json"
+    else:
+        manifest_path = target
+
+    if not manifest_path.exists():
+        print(f"manifest not found: {manifest_path}", file=sys.stderr)
+        return 1
+
+    root = manifest_path.parent
+    manifest = _read_json(manifest_path)
+
+    bundle = {
+        "manifest": manifest,
+        "layers": {},
+        "history": [],
+    }
+
+    # Load layers deterministically
+    for ent in manifest.get("layers", []):
+        lid = ent["layerId"]
+        path = root / ent["file"]
+        bundle["layers"][lid] = _read_json(path)
+
+    # Load history deterministically
+    hist = manifest.get("history", {})
+    hist_path = root / hist.get("file", "")
+    if hist_path.exists():
+        with hist_path.open("r", encoding="utf-8") as f:
+            for line in f:
+                s = line.strip()
+                if s:
+                    bundle["history"].append(json.loads(s))
+
+    digest = _sha256_hex(_canonical_json_bytes(bundle))
+    print(digest)
+    return 0
+
+
+def _mk_min_layer(nodes: List[Dict[str, Any]], edges: List[Dict[str, Any]]) -> Dict[str, Any]:
+    return {"nodes": nodes, "edges": edges}
+
+
+def _mk_event(prev_hash: str, t: float, op: str, target: str, extra: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    ev: Dict[str, Any] = {
+        "t": t,
+        "prev_hash": prev_hash,
+        "op": op,
+        "target": target,
+    }
+    if extra:
+        ev.update(extra)
+    ev["hash"] = _sha256_hex(_canonical_json_bytes({k: v for k, v in ev.items() if k != "hash"}))
+    return ev
+
+
+def cmd_init(args: argparse.Namespace) -> int:
+    out_dir = Path(args.dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Project layout
+    (out_dir / "layers").mkdir(parents=True, exist_ok=True)
+    (out_dir / "build").mkdir(parents=True, exist_ok=True)
+
+    # Minimal geometry layer (JSON Canvas style)
+    geometry = _mk_min_layer(
+        nodes=[
+            {
+                "id": "edge0",
+                "type": "text",
+                "x": 0,
+                "y": 0,
+                "width": 320,
+                "height": 180,
+                "text": "edge0\nTest Edge",
+            }
+        ],
+        edges=[],
+    )
+
+    # Minimal power layer (references geometry node id)
+    power = _mk_min_layer(
+        nodes=[
+            {
+                "id": "edge0",
+                "type": "text",
+                "x": 360,
+                "y": 0,
+                "width": 320,
+                "height": 180,
+                "text": "Power spec for edge0",
+            }
+        ],
+        edges=[],
+    )
+
+    _write_json(out_dir / "layers" / "geometry.canvas.json", geometry)
+    _write_json(out_dir / "layers" / "power.canvas.json", power)
+
+    manifest = {
+        "hdVersion": "1",
+        "schemaVersion": "1.0.0",
+        "project": args.project or out_dir.name,
+        "layers": [
+            {"layerId": "geometry", "file": "layers/geometry.canvas.json"},
+            {"layerId": "power", "file": "layers/power.canvas.json"},
+        ],
+        "history": {"file": "build/history.ndjson"},
+    }
+    _write_json(out_dir / "manifest.json", manifest)
+
+    # Minimal deterministic history chain.
+    prev = ZERO_HASH
+    ev1 = _mk_event(prev, t=1.0, op="create", target="edge0")
+    prev = ev1["hash"]
+    ev2 = _mk_event(prev, t=2.0, op="annotate", target="edge0", extra={"note": "init"})
+
+    hist_path = out_dir / "build" / "history.ndjson"
+    with hist_path.open("w", encoding="utf-8") as f:
+        f.write(json.dumps(ev1, sort_keys=True) + "\n")
+        f.write(json.dumps(ev2, sort_keys=True) + "\n")
+
+    print(str(out_dir / "manifest.json"))
+    return 0
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    p = argparse.ArgumentParser(prog="hd", description="Hardware-OS (minimal)")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    sp_init = sub.add_parser("init", help="Create a minimal Hardware-OS project")
+    sp_init.add_argument("dir", help="Output directory to create")
+    sp_init.add_argument("--project", help="Project name (defaults to dir basename)")
+    sp_init.set_defaults(func=cmd_init)
+
+    sp_val = sub.add_parser("validate", help="Validate a manifest or project directory")
+    sp_val.add_argument("target", help="Path to manifest.json or project directory")
+    sp_val.add_argument("--strict", action="store_true", help="Treat optional checks as errors")
+    sp_val.add_argument(
+        "--format",
+        choices=["text", "json", "github"],
+        default="text",
+        help="Output format",
+    )
+    sp_val.set_defaults(func=cmd_validate)
+
+    sp_rep = sub.add_parser("replay", help="Deterministic replay digest")
+    sp_rep.add_argument("target", help="Project directory or manifest.json")
+    sp_rep.set_defaults(func=cmd_replay)
+
+    args = p.parse_args(argv)
+    return int(args.func(args))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

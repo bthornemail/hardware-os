@@ -1,0 +1,1240 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Hardware-OS Inspector</title>
+  <style>
+    :root {
+      --bg: #fbfbfb;
+      --panel: #ffffff;
+      --border: #dddddd;
+      --text: #111111;
+      --muted: #555555;
+      --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+
+      --same: #e8ffe8;
+      --changed: #fff2a8;
+      --missingR: #ffb3b3;
+      --missingL: #b3d1ff;
+
+      --selStroke: #000000;
+      --hoverStroke: #333333;
+      --stroke: #555555;
+    }
+
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); }
+
+    #top {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      display:flex;
+      gap: 10px;
+      align-items:center;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel);
+      flex-wrap: wrap;
+    }
+
+    .pill { display:inline-flex; align-items:center; gap:8px; padding:2px 10px; border:1px solid var(--border); border-radius:999px; font-size:12px; background:#fff; }
+    .small { font-size: 12px; color: var(--muted); }
+    .mono { font-family: var(--mono); font-size: 12px; white-space: pre-wrap; }
+
+    .seg {
+      display:flex;
+      border:1px solid var(--border);
+      border-radius: 10px;
+      overflow:hidden;
+      background:#fff;
+    }
+    .seg button {
+      border:0;
+      background: transparent;
+      padding: 7px 10px;
+      font-size: 12px;
+      cursor: pointer;
+      color: var(--muted);
+    }
+    .seg button.active { background:#111; color:#fff; }
+
+    button {
+      border:1px solid var(--border);
+      background:#fff;
+      padding: 7px 10px;
+      border-radius: 10px;
+      cursor:pointer;
+      font-size: 12px;
+    }
+    button:active { transform: translateY(1px); }
+
+    input, select {
+      border: 1px solid var(--border);
+      background:#fff;
+      padding: 7px 10px;
+      border-radius: 10px;
+      font-size: 12px;
+    }
+
+    .chip {
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      padding: 3px 10px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      font-size: 12px;
+      background:#fff;
+    }
+    .chip.ok { border-color: #9fdb9f; background: #f2fff2; }
+    .chip.warn { border-color: #e4cd6a; background: #fffbea; }
+    .chip.bad { border-color: #e38f8f; background: #fff2f2; }
+
+    #app {
+      height: calc(100vh - 56px);
+      display:grid;
+      grid-template-columns: 320px 1fr 380px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border-right: 1px solid var(--border);
+      overflow: auto;
+      padding: 12px;
+    }
+
+    #right {
+      border-right: 0;
+      border-left: 1px solid var(--border);
+    }
+
+    #stage {
+      position: relative;
+      overflow: hidden;
+      background: radial-gradient(1200px 700px at 30% 30%, #ffffff, #f5f5f5);
+    }
+
+    canvas { width: 100%; height: 100%; display:block; }
+
+    .tabs {
+      display:flex;
+      gap:8px;
+      margin-bottom: 10px;
+    }
+    .tabs button { padding: 6px 10px; border-radius: 999px; }
+    .tabs button.active { background:#111; color:#fff; border-color:#111; }
+
+    .row { margin: 10px 0; }
+    .rowTitle { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+
+    .kv { display:flex; gap:8px; align-items:center; flex-wrap: wrap; }
+    .kv .k { color: var(--muted); font-size: 12px; }
+
+    .toolbar {
+      position:absolute;
+      top: 12px;
+      right: 12px;
+      display:flex;
+      flex-direction: column;
+      gap: 8px;
+      background: rgba(255,255,255,0.9);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 10px;
+      backdrop-filter: blur(6px);
+    }
+    .toolbar .grp { display:flex; flex-direction: column; gap:6px; }
+    .toolbar button { padding: 6px 8px; border-radius: 10px; }
+
+    .legend {
+      position:absolute;
+      left: 12px;
+      bottom: 12px;
+      background: rgba(255,255,255,0.9);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 10px;
+      font-size: 12px;
+      color: var(--muted);
+      backdrop-filter: blur(6px);
+    }
+
+    .hidden { display:none !important; }
+
+    /* Tablet: collapse right panel */
+    @media (max-width: 1100px) {
+      #app { grid-template-columns: 320px 1fr; }
+      #right { display:none; }
+    }
+
+    /* Mobile: stage full width, panels become toggles */
+    @media (max-width: 760px) {
+      #app { grid-template-columns: 1fr; }
+      #left { display:none; }
+      #right { display:none; }
+      #top { gap: 8px; }
+      .toolbar { top: auto; bottom: 12px; right: 12px; flex-direction: row; flex-wrap: wrap; max-width: calc(100% - 24px); }
+    }
+
+    dialog {
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 12px;
+      max-width: 900px;
+      width: calc(100% - 24px);
+    }
+    dialog::backdrop { background: rgba(0,0,0,0.35); }
+
+    .twoCol {
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    @media (max-width: 760px) {
+      .twoCol { grid-template-columns: 1fr; }
+    }
+
+    .box {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px;
+      background:#fff;
+    }
+
+    .list {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow:hidden;
+      background:#fff;
+    }
+    .list .item {
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      font-family: var(--mono);
+      font-size: 12px;
+    }
+    .list .item:last-child { border-bottom: 0; }
+    .list .item:hover { background:#f6f6f6; }
+    .list .item.active { background:#111; color:#fff; }
+
+    .tag { display:inline-block; padding: 1px 8px; border-radius:999px; border:1px solid var(--border); font-size:12px; background:#fff; }
+  </style>
+</head>
+<body>
+  <div id="top">
+    <div class="pill">
+      <strong>Hardware-OS Inspector</strong>
+      <span class="small">projection UI</span>
+    </div>
+
+    <div class="seg" role="tablist" aria-label="Mode">
+      <button id="modeBrowse" class="active" data-mode="browse">Browse</button>
+      <button id="modeCompare" data-mode="compare">Compare</button>
+      <button id="modeReplay" data-mode="replay">Replay</button>
+      <button id="modeValidate" data-mode="validate">Validate</button>
+    </div>
+
+    <div id="projBrowse" class="kv">
+      <span class="k small">project</span>
+      <input id="project" value="examples/infinity-cube" style="width:320px" />
+      <button id="loadOne">Load</button>
+    </div>
+
+    <div id="projCompare" class="kv hidden">
+      <span class="k small">left</span>
+      <input id="projectL" value="examples/infinity-cube" style="width:260px" />
+      <span class="k small">right</span>
+      <input id="projectR" value="examples/infinity-cube" style="width:260px" />
+      <button id="loadTwo">Compare</button>
+    </div>
+
+    <div class="kv">
+      <span class="k small">layer</span>
+      <select id="layer" style="width:200px"></select>
+    </div>
+
+    <div id="statusChip" class="chip"><span id="statusText">not loaded</span></div>
+
+    <button id="help">Help</button>
+  </div>
+
+  <div id="app">
+    <div id="left" class="panel">
+      <div class="tabs">
+        <button id="tabLayers" class="active" data-tab="layers">Layers</button>
+        <button id="tabHistory" data-tab="history">History</button>
+        <button id="tabFind" data-tab="find">Find</button>
+        <button id="tabDiag" data-tab="diag">Diagnostics</button>
+      </div>
+
+      <div id="paneLayers">
+        <div class="row">
+          <div class="rowTitle">Layer visibility</div>
+          <div class="box small">
+            Geometry base draws a faint geometry layer behind the active layer.
+          </div>
+        </div>
+
+        <div class="row">
+          <label class="small"><input id="toggleGeomBase" type="checkbox" /> geometry base</label>
+        </div>
+
+        <div class="row">
+          <label class="small"><input id="toggleEdges" type="checkbox" /> edges (left only)</label>
+        </div>
+
+        <div class="row hidden" id="compareOptions">
+          <div class="rowTitle">Compare options</div>
+          <label class="small"><input id="toggleIgnoreLayout" type="checkbox" checked /> semantic-only (ignore x,y,width,height)</label>
+        </div>
+
+        <div class="row hidden" id="compareLegend">
+          <div class="rowTitle">Legend</div>
+          <div class="box small">
+            🟢 same<br>
+            🟡 changed<br>
+            🔴 missing in right<br>
+            🔵 missing in left
+          </div>
+        </div>
+
+        <div class="row hidden" id="compareNav">
+          <div class="rowTitle">Diff navigation</div>
+          <div class="kv">
+            <button id="prevDiff">Prev Diff</button>
+            <button id="nextDiff">Next Diff</button>
+            <span id="diffCount" class="small"></span>
+          </div>
+        </div>
+      </div>
+
+      <div id="paneHistory" class="hidden">
+        <div class="row">
+          <div class="rowTitle">Timeline (left only)</div>
+          <input id="event" type="range" min="0" max="0" value="0" />
+          <div class="small" id="eventLabel"></div>
+        </div>
+
+        <div class="row">
+          <div class="rowTitle">Events</div>
+          <div id="eventList" class="list"></div>
+        </div>
+      </div>
+
+      <div id="paneFind" class="hidden">
+        <div class="row">
+          <div class="rowTitle">Search</div>
+          <input id="find" placeholder="node id / text prefix" />
+        </div>
+        <div class="row">
+          <div class="rowTitle">Results</div>
+          <div id="findList" class="list"></div>
+        </div>
+      </div>
+
+      <div id="paneDiag" class="hidden">
+        <div class="row">
+          <div class="rowTitle">Kernel validation</div>
+          <div class="box small">
+            Uses <span class="mono">tools/hd validate</span> via the local server. UI does not re-implement validator semantics.
+          </div>
+        </div>
+
+        <div class="row">
+          <button id="runValidate">Run validate</button>
+          <label class="small" style="margin-left:10px"><input id="validateStrict" type="checkbox" /> strict</label>
+        </div>
+
+        <div class="row">
+          <div id="diagOut" class="mono"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="stage">
+      <canvas id="c"></canvas>
+
+      <div class="toolbar" aria-label="Stage toolbar">
+        <div class="grp">
+          <button id="zoomIn">Zoom +</button>
+          <button id="zoomOut">Zoom -</button>
+          <button id="fit">Fit</button>
+        </div>
+        <div class="grp">
+          <button id="centerSel">Center</button>
+          <button id="reset">Reset</button>
+        </div>
+      </div>
+
+      <div class="legend" id="hudLegend">
+        <div class="small">Tips: wheel=zoom, drag=pan, click=inspect</div>
+      </div>
+    </div>
+
+    <div id="right" class="panel">
+      <div class="row">
+        <div class="rowTitle">Inspector</div>
+        <div class="box small" id="selTitle">(none)</div>
+      </div>
+
+      <div class="row" id="compareInspector" class="hidden">
+        <div class="rowTitle">Compare</div>
+        <div id="compareStatus" class="tag"></div>
+        <div class="twoCol" style="margin-top:10px">
+          <div>
+            <div class="small">Left</div>
+            <div id="jsonLeft" class="mono box"></div>
+          </div>
+          <div>
+            <div class="small">Right</div>
+            <div id="jsonRight" class="mono box"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row" id="singleInspector">
+        <div class="rowTitle">JSON</div>
+        <div id="jsonOne" class="mono box"></div>
+      </div>
+    </div>
+  </div>
+
+  <dialog id="helpDlg">
+    <div class="rowTitle">Hardware-OS Inspector</div>
+    <div class="box small">
+      WARNING: This viewer and <span class="mono">hd-serve</span> are intended for local debugging only. Do not expose to untrusted networks.
+    </div>
+
+    <div class="row">
+      <div class="rowTitle">Shortcuts</div>
+      <div class="mono box">?   help
+Esc clear selection
+E   toggle edges
+G   toggle geometry base
+F   fit to content
+N/P next/prev diff (compare)
+[ / ] prev/next event (replay)
+Ctrl/Cmd+K focus search
+      </div>
+    </div>
+
+    <div class="row" style="display:flex; justify-content:flex-end">
+      <button id="closeHelp">Close</button>
+    </div>
+  </dialog>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+const Mode = { browse: 'browse', compare: 'compare', replay: 'replay', validate: 'validate' };
+let mode = Mode.browse;
+let activeTab = 'layers';
+
+let bundle = null;   // browse
+let bundleL = null;  // compare
+let bundleR = null;  // compare
+
+let currentLayerId = null;
+let selectedNodeId = null;
+let hoveredNodeId = null;
+
+let lastDrawn = [];     // [{id, node, type, rect:{x,y,w,h}}]
+let lastDiffs = [];     // compare diffs list
+let diffCursor = -1;
+
+const view = {
+  panX: 0,
+  panY: 0,
+  zoom: 1.0,
+  dragging: false,
+  lastX: 0,
+  lastY: 0,
+};
+
+function setChip(kind, text) {
+  const el = $("statusChip");
+  el.classList.remove('ok','warn','bad');
+  if (kind) el.classList.add(kind);
+  $("statusText").textContent = text;
+}
+
+function apiUrlBundle(project) {
+  return `/api/bundle?project=${encodeURIComponent(project)}`;
+}
+function apiUrlValidate(project, strict) {
+  const s = strict ? '&strict=1' : '';
+  return `/api/validate?project=${encodeURIComponent(project)}${s}`;
+}
+
+function stableStringify(x) {
+  const seen = new Set();
+  function norm(v) {
+    if (v === null) return null;
+    const t = typeof v;
+    if (t === 'string' || t === 'number' || t === 'boolean') return v;
+    if (Array.isArray(v)) return v.map(norm);
+    if (t === 'object') {
+      if (seen.has(v)) return '[Circular]';
+      seen.add(v);
+      const out = {};
+      for (const k of Object.keys(v).sort()) out[k] = norm(v[k]);
+      seen.delete(v);
+      return out;
+    }
+    return String(v);
+  }
+  return JSON.stringify(norm(x));
+}
+
+function stripLayout(n) {
+  if (!n || typeof n !== 'object') return n;
+  const out = {};
+  for (const k of Object.keys(n)) {
+    if (k === 'x' || k === 'y' || k === 'width' || k === 'height') continue;
+    out[k] = n[k];
+  }
+  return out;
+}
+
+function nodesEqual(a, b) {
+  const ignore = $("toggleIgnoreLayout").checked;
+  const aa = ignore ? stripLayout(a) : a;
+  const bb = ignore ? stripLayout(b) : b;
+  return stableStringify(aa) === stableStringify(bb);
+}
+
+function nodeRect(n) {
+  const x = +n.x || 0;
+  const y = +n.y || 0;
+  const w = +n.width || 220;
+  const h = +n.height || 120;
+  return {x,y,w,h};
+}
+
+function worldToScreen(x,y) {
+  return { x: (x * view.zoom) + view.panX, y: (y * view.zoom) + view.panY };
+}
+function screenToWorld(x,y) {
+  return { x: (x - view.panX) / view.zoom, y: (y - view.panY) / view.zoom };
+}
+
+function layerObjFrom(b, layerId) {
+  if (!b || !layerId) return {};
+  return (b.layers || {})[layerId] || {};
+}
+
+function nodesFrom(b, layerId) {
+  const L = layerObjFrom(b, layerId);
+  return Array.isArray(L.nodes) ? L.nodes : [];
+}
+
+function edgesFrom(b, layerId) {
+  const L = layerObjFrom(b, layerId);
+  return Array.isArray(L.edges) ? L.edges : [];
+}
+
+function unionLayerIds() {
+  if (mode === Mode.browse || mode === Mode.replay || mode === Mode.validate) {
+    return Object.keys((bundle && bundle.layers) || {}).sort();
+  }
+  const s = new Set([ ...Object.keys((bundleL && bundleL.layers) || {}), ...Object.keys((bundleR && bundleR.layers) || {}) ]);
+  return [...s].sort();
+}
+
+function updateLayerSelect() {
+  const ids = unionLayerIds();
+  $("layer").innerHTML = ids.map(id => `<option value="${id}">${id}</option>`).join('');
+  currentLayerId = ids[0] || null;
+  $("layer").value = currentLayerId || '';
+}
+
+function diffNodes(nodesL, nodesR) {
+  const mapL = Object.fromEntries(nodesL.filter(n => n && n.id).map(n => [n.id, n]));
+  const mapR = Object.fromEntries(nodesR.filter(n => n && n.id).map(n => [n.id, n]));
+
+  const ids = new Set([...Object.keys(mapL), ...Object.keys(mapR)]);
+  const out = [];
+  for (const id of ids) {
+    const a = mapL[id];
+    const b = mapR[id];
+    if (a && b) out.push({ id, type: nodesEqual(a,b) ? 'same' : 'changed', node: a, nodeL: a, nodeR: b });
+    else if (a && !b) out.push({ id, type: 'missingR', node: a, nodeL: a, nodeR: null });
+    else if (!a && b) out.push({ id, type: 'missingL', node: b, nodeL: null, nodeR: b });
+  }
+  out.sort((x,y) => (x.id||'').localeCompare(y.id||''));
+  return out;
+}
+
+function pickNodeAt(screenX, screenY) {
+  const p = screenToWorld(screenX, screenY);
+  for (let i = lastDrawn.length - 1; i >= 0; i--) {
+    const r = lastDrawn[i].rect;
+    if (p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h) return lastDrawn[i].id;
+  }
+  return null;
+}
+
+function fitToContent() {
+  const canvas = $("c");
+  const nodes = visibleNodesForFit();
+  if (!nodes.length) return;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const n of nodes) {
+    const r = nodeRect(n);
+    minX = Math.min(minX, r.x);
+    minY = Math.min(minY, r.y);
+    maxX = Math.max(maxX, r.x + r.w);
+    maxY = Math.max(maxY, r.y + r.h);
+  }
+  const pad = 40;
+  const w = Math.max(1, (maxX - minX) + pad*2);
+  const h = Math.max(1, (maxY - minY) + pad*2);
+  const sx = canvas.width / w;
+  const sy = canvas.height / h;
+  view.zoom = Math.min(4.0, Math.max(0.2, Math.min(sx, sy)));
+  // pan so (minX-pad, minY-pad) maps to (0,0)
+  view.panX = - (minX - pad) * view.zoom;
+  view.panY = - (minY - pad) * view.zoom;
+}
+
+function visibleNodesForFit() {
+  if (mode === Mode.compare) {
+    const L = nodesFrom(bundleL, currentLayerId);
+    const R = nodesFrom(bundleR, currentLayerId);
+    const diffs = diffNodes(L,R);
+    return diffs.map(d => d.node);
+  }
+  const b = bundle;
+  if (!b || !currentLayerId) return [];
+  const nodes = nodesFrom(b, currentLayerId);
+  if ($("toggleGeomBase").checked && currentLayerId !== 'geometry') {
+    return [...nodesFrom(b, 'geometry'), ...nodes];
+  }
+  return nodes;
+}
+
+function centerOnNode(n) {
+  const canvas = $("c");
+  const r = nodeRect(n);
+  const cx = r.x + r.w/2;
+  const cy = r.y + r.h/2;
+  view.panX = (canvas.width/2) - (cx * view.zoom);
+  view.panY = (canvas.height/2) - (cy * view.zoom);
+}
+
+function setMode(m) {
+  mode = m;
+  for (const id of ["modeBrowse","modeCompare","modeReplay","modeValidate"]) {
+    $(id).classList.remove('active');
+  }
+  if (m === Mode.browse) $("modeBrowse").classList.add('active');
+  if (m === Mode.compare) $("modeCompare").classList.add('active');
+  if (m === Mode.replay) $("modeReplay").classList.add('active');
+  if (m === Mode.validate) $("modeValidate").classList.add('active');
+
+  $("projBrowse").classList.toggle('hidden', !(m === Mode.browse || m === Mode.replay || m === Mode.validate));
+  $("projCompare").classList.toggle('hidden', !(m === Mode.compare));
+
+  $("compareOptions").classList.toggle('hidden', m !== Mode.compare);
+  $("compareLegend").classList.toggle('hidden', m !== Mode.compare);
+  $("compareNav").classList.toggle('hidden', m !== Mode.compare);
+
+  // Tabs: history is relevant in replay; diagnostics in validate.
+  if (m === Mode.replay) setTab('history');
+  else if (m === Mode.validate) setTab('diag');
+  else setTab('layers');
+
+  // Reset selection/diff cursor.
+  selectedNodeId = null;
+  hoveredNodeId = null;
+  diffCursor = -1;
+  render();
+}
+
+function setTab(t) {
+  activeTab = t;
+  for (const id of ["tabLayers","tabHistory","tabFind","tabDiag"]) $(id).classList.remove('active');
+  if (t === 'layers') $("tabLayers").classList.add('active');
+  if (t === 'history') $("tabHistory").classList.add('active');
+  if (t === 'find') $("tabFind").classList.add('active');
+  if (t === 'diag') $("tabDiag").classList.add('active');
+
+  $("paneLayers").classList.toggle('hidden', t !== 'layers');
+  $("paneHistory").classList.toggle('hidden', t !== 'history');
+  $("paneFind").classList.toggle('hidden', t !== 'find');
+  $("paneDiag").classList.toggle('hidden', t !== 'diag');
+}
+
+function updateInspector() {
+  const hasSel = !!selectedNodeId;
+  $("selTitle").textContent = hasSel ? selectedNodeId : '(none)';
+
+  if (mode === Mode.compare) {
+    $("compareInspector").classList.remove('hidden');
+    $("singleInspector").classList.add('hidden');
+
+    if (!hasSel) {
+      $("compareStatus").textContent = '';
+      $("jsonLeft").textContent = '';
+      $("jsonRight").textContent = '';
+      return;
+    }
+
+    const a = nodesFrom(bundleL, currentLayerId).find(n => n.id === selectedNodeId) || null;
+    const b = nodesFrom(bundleR, currentLayerId).find(n => n.id === selectedNodeId) || null;
+    let status = '(unknown)';
+    if (a && b) status = nodesEqual(a,b) ? 'same' : 'changed';
+    else if (a && !b) status = 'missing in right';
+    else if (!a && b) status = 'missing in left';
+
+    $("compareStatus").textContent = status;
+    $("jsonLeft").textContent = a ? JSON.stringify(a, null, 2) : 'null';
+    $("jsonRight").textContent = b ? JSON.stringify(b, null, 2) : 'null';
+    return;
+  }
+
+  $("compareInspector").classList.add('hidden');
+  $("singleInspector").classList.remove('hidden');
+
+  if (!hasSel) {
+    $("jsonOne").textContent = '';
+    return;
+  }
+
+  const b = bundle;
+  const n = nodesFrom(b, currentLayerId).find(x => x.id === selectedNodeId) || null;
+  $("jsonOne").textContent = n ? JSON.stringify(n, null, 2) : '(missing)';
+}
+
+function updateFind() {
+  const q = $("find").value.trim().toLowerCase();
+  const list = $("findList");
+  list.innerHTML = '';
+  if (!q) return;
+
+  let nodes = [];
+  if (mode === Mode.compare) {
+    const diffs = lastDiffs.length ? lastDiffs : diffNodes(nodesFrom(bundleL, currentLayerId), nodesFrom(bundleR, currentLayerId));
+    nodes = diffs.map(d => d.node);
+  } else {
+    nodes = nodesFrom(bundle, currentLayerId);
+  }
+
+  const hits = nodes.filter(n => {
+    const id = (n.id || '').toString().toLowerCase();
+    const txt = (n.text || n.label || '').toString().toLowerCase();
+    return id.includes(q) || txt.includes(q);
+  }).slice(0, 200);
+
+  for (const n of hits) {
+    const div = document.createElement('div');
+    div.className = 'item';
+    div.textContent = `${n.id}`;
+    div.onclick = () => {
+      selectedNodeId = n.id;
+      updateInspector();
+      centerOnNode(n);
+      render();
+    };
+    list.appendChild(div);
+  }
+}
+
+function updateHistoryUI() {
+  const events = (bundle && bundle.history) || [];
+  $("event").min = 0;
+  $("event").max = Math.max(0, events.length - 1);
+  if (+$("event").value > +$("event").max) $("event").value = 0;
+
+  const idx = +$("event").value || 0;
+  const ev = events[idx] || null;
+  $("eventLabel").textContent = ev ? `#${idx} op=${ev.op || '?'} target=${ev.target || '?'} t=${ev.t || '?'} hash=${(ev.hash||'').slice(0,8)}` : '(no history)';
+
+  const list = $("eventList");
+  list.innerHTML = '';
+  const show = events.slice(0, 400);
+  for (let i = 0; i < show.length; i++) {
+    const e = show[i];
+    const div = document.createElement('div');
+    div.className = 'item' + (i === idx ? ' active' : '');
+    const hp = (e.hash || '').slice(0, 8);
+    div.textContent = `${i} t=${e.t} op=${e.op} target=${e.target} ${hp}`;
+    div.onclick = () => {
+      $("event").value = String(i);
+      onEventScrub();
+    };
+    list.appendChild(div);
+  }
+}
+
+function onEventScrub() {
+  const events = (bundle && bundle.history) || [];
+  const idx = +$("event").value || 0;
+  const ev = events[idx] || null;
+  updateHistoryUI();
+  if (ev && typeof ev.target === 'string') {
+    selectedNodeId = ev.target;
+    updateInspector();
+    // best-effort center on geometry of node in current layer
+    const n = nodesFrom(bundle, currentLayerId).find(x => x.id === selectedNodeId) || null;
+    if (n) centerOnNode(n);
+    render();
+  }
+}
+
+async function runValidate() {
+  const strict = $("validateStrict").checked;
+  $("diagOut").textContent = 'running…';
+
+  if (mode === Mode.compare) {
+    $("diagOut").textContent = 'validate is per-project; switch to Browse/Validate to run on a single project.';
+    return;
+  }
+
+  const proj = $("project").value.trim();
+  const r = await fetch(apiUrlValidate(proj, strict));
+  const data = await r.json();
+  if (!r.ok) {
+    $("diagOut").textContent = JSON.stringify(data, null, 2);
+    setChip('bad', 'invalid');
+    return;
+  }
+
+  // data.issues is the JSON output from tools/hd validate --format=json (or null if parse failed)
+  const issues = Array.isArray(data.issues) ? data.issues : null;
+  $("diagOut").textContent = JSON.stringify(data, null, 2);
+
+  if (data.ok) {
+    setChip('ok', 'ISOMORPHIC');
+  } else if (issues && issues.some(i => i.kind === 'warning')) {
+    setChip('warn', 'warnings');
+  } else {
+    setChip('bad', 'invalid');
+  }
+}
+
+function updateStatusFromBundles() {
+  // Minimal: assume ok after load. Diagnostics tab gives real kernel output.
+  setChip(null, 'loaded');
+}
+
+async function loadOne() {
+  const proj = $("project").value.trim();
+  setChip(null, 'loading…');
+  const r = await fetch(apiUrlBundle(proj));
+  const data = await r.json();
+  if (!r.ok) {
+    setChip('bad', 'error');
+    alert(data.error || 'failed');
+    return;
+  }
+  bundle = data;
+  bundleL = null;
+  bundleR = null;
+  updateLayerSelect();
+  selectedNodeId = null;
+  hoveredNodeId = null;
+  diffCursor = -1;
+  updateHistoryUI();
+  updateStatusFromBundles();
+  resizeAndRender();
+  fitToContent();
+  render();
+}
+
+async function loadTwo() {
+  const projL = $("projectL").value.trim();
+  const projR = $("projectR").value.trim();
+  setChip(null, 'loading…');
+
+  const [rL, rR] = await Promise.all([fetch(apiUrlBundle(projL)), fetch(apiUrlBundle(projR))]);
+  bundleL = await rL.json();
+  bundleR = await rR.json();
+  if (!rL.ok || !rR.ok) {
+    setChip('bad', 'error');
+    alert('failed to load one of the projects');
+    return;
+  }
+
+  bundle = null;
+  updateLayerSelect();
+  selectedNodeId = null;
+  hoveredNodeId = null;
+  diffCursor = -1;
+  updateStatusFromBundles();
+  resizeAndRender();
+  fitToContent();
+  render();
+}
+
+function gotoDiff(dir) {
+  const diffs = lastDiffs.filter(d => d.type !== 'same');
+  if (!diffs.length) return;
+  diffCursor = (diffCursor + dir + diffs.length) % diffs.length;
+  const d = diffs[diffCursor];
+  selectedNodeId = d.id;
+  updateInspector();
+  centerOnNode(d.node);
+  render();
+}
+
+function render() {
+  const canvas = $("c");
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  lastDrawn = [];
+  lastDiffs = [];
+
+  if (!currentLayerId) {
+    ctx.fillStyle = '#333';
+    ctx.font = `12px ${getComputedStyle(document.documentElement).getPropertyValue('--mono')}`;
+    ctx.fillText('No layer loaded.', 20, 30);
+    return;
+  }
+
+  const geomBase = $("toggleGeomBase").checked;
+  const showEdges = $("toggleEdges").checked;
+
+  if (mode === Mode.compare) {
+    if (!bundleL || !bundleR) {
+      ctx.fillStyle = '#333';
+      ctx.fillText('Load two projects to compare.', 20, 30);
+      return;
+    }
+
+    const nodesL = nodesFrom(bundleL, currentLayerId);
+    const nodesR = nodesFrom(bundleR, currentLayerId);
+    const diffs = diffNodes(nodesL, nodesR);
+    lastDiffs = diffs;
+
+    // edges: left only, optional
+    if (showEdges) {
+      const edgesL = edgesFrom(bundleL, currentLayerId);
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#666';
+      for (const e of edgesL) {
+        const a = nodesL.find(n => n.id === e.fromNode);
+        const b = nodesL.find(n => n.id === e.toNode);
+        if (!a || !b) continue;
+        const ra = nodeRect(a), rb = nodeRect(b);
+        const pa = worldToScreen(ra.x + ra.w/2, ra.y + ra.h/2);
+        const pb = worldToScreen(rb.x + rb.w/2, rb.y + rb.h/2);
+        ctx.beginPath();
+        ctx.moveTo(pa.x, pa.y);
+        ctx.lineTo(pb.x, pb.y);
+        ctx.stroke();
+      }
+    }
+
+    // geometry base: left geometry only (v1)
+    if (geomBase && currentLayerId !== 'geometry') {
+      const g = nodesFrom(bundleL, 'geometry');
+      ctx.globalAlpha = 0.25;
+      for (const n of g) {
+        const r = nodeRect(n);
+        const p = worldToScreen(r.x, r.y);
+        ctx.fillStyle = '#eaeaea';
+        ctx.strokeStyle = '#999';
+        ctx.lineWidth = 1;
+        ctx.fillRect(p.x, p.y, r.w * view.zoom, r.h * view.zoom);
+        ctx.strokeRect(p.x, p.y, r.w * view.zoom, r.h * view.zoom);
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    const palette = {
+      same: getComputedStyle(document.documentElement).getPropertyValue('--same').trim(),
+      changed: getComputedStyle(document.documentElement).getPropertyValue('--changed').trim(),
+      missingR: getComputedStyle(document.documentElement).getPropertyValue('--missingR').trim(),
+      missingL: getComputedStyle(document.documentElement).getPropertyValue('--missingL').trim(),
+    };
+
+    const diffsOnly = diffs.filter(d => d.type !== 'same').length;
+    $("diffCount").textContent = diffsOnly ? `${diffsOnly} diffs` : 'no diffs';
+
+    for (const d of diffs) {
+      const n = d.node;
+      const r = nodeRect(n);
+      const p = worldToScreen(r.x, r.y);
+      const isSel = (n.id === selectedNodeId);
+      const isHover = (n.id === hoveredNodeId);
+
+      ctx.fillStyle = palette[d.type] || '#f5f5f5';
+      ctx.strokeStyle = isSel ? getComputedStyle(document.documentElement).getPropertyValue('--selStroke').trim() : (isHover ? getComputedStyle(document.documentElement).getPropertyValue('--hoverStroke').trim() : getComputedStyle(document.documentElement).getPropertyValue('--stroke').trim());
+      ctx.lineWidth = isSel ? 4 : 2;
+      ctx.fillRect(p.x, p.y, r.w * view.zoom, r.h * view.zoom);
+      ctx.strokeRect(p.x, p.y, r.w * view.zoom, r.h * view.zoom);
+
+      ctx.fillStyle = '#111';
+      ctx.font = `${Math.max(12, 12*view.zoom)}px ${getComputedStyle(document.documentElement).getPropertyValue('--mono')}`;
+      const label = (n.text || n.label || n.id || '').toString().split('\n')[0];
+      ctx.fillText(label, p.x + 8, p.y + 18);
+
+      lastDrawn.push({ id: n.id, node: n, type: d.type, rect: r });
+    }
+
+    return;
+  }
+
+  // browse/replay/validate: single bundle
+  if (!bundle) {
+    ctx.fillStyle = '#333';
+    ctx.fillText('Load a project.', 20, 30);
+    return;
+  }
+
+  const nodes = nodesFrom(bundle, currentLayerId);
+  const edges = edgesFrom(bundle, currentLayerId);
+
+  // geometry base overlay
+  if (geomBase && currentLayerId !== 'geometry') {
+    const g = nodesFrom(bundle, 'geometry');
+    ctx.globalAlpha = 0.25;
+    for (const n of g) {
+      const r = nodeRect(n);
+      const p = worldToScreen(r.x, r.y);
+      ctx.fillStyle = '#eaeaea';
+      ctx.strokeStyle = '#999';
+      ctx.lineWidth = 1;
+      ctx.fillRect(p.x, p.y, r.w * view.zoom, r.h * view.zoom);
+      ctx.strokeRect(p.x, p.y, r.w * view.zoom, r.h * view.zoom);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  if (showEdges) {
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#666';
+    for (const e of edges) {
+      const a = nodes.find(n => n.id === e.fromNode);
+      const b = nodes.find(n => n.id === e.toNode);
+      if (!a || !b) continue;
+      const ra = nodeRect(a), rb = nodeRect(b);
+      const pa = worldToScreen(ra.x + ra.w/2, ra.y + ra.h/2);
+      const pb = worldToScreen(rb.x + rb.w/2, rb.y + rb.h/2);
+      ctx.beginPath();
+      ctx.moveTo(pa.x, pa.y);
+      ctx.lineTo(pb.x, pb.y);
+      ctx.stroke();
+    }
+  }
+
+  for (const n of nodes) {
+    const r = nodeRect(n);
+    const p = worldToScreen(r.x, r.y);
+    const isSel = (n.id === selectedNodeId);
+    const isHover = (n.id === hoveredNodeId);
+
+    ctx.fillStyle = isSel ? '#ffe8a3' : (isHover ? '#e6f2ff' : '#f5f5f5');
+    ctx.strokeStyle = isSel ? '#000' : '#777';
+    ctx.lineWidth = isSel ? 3 : 1;
+    ctx.fillRect(p.x, p.y, r.w * view.zoom, r.h * view.zoom);
+    ctx.strokeRect(p.x, p.y, r.w * view.zoom, r.h * view.zoom);
+
+    ctx.fillStyle = '#111';
+    ctx.font = `${Math.max(12, 12*view.zoom)}px ${getComputedStyle(document.documentElement).getPropertyValue('--mono')}`;
+    const label = (n.text || n.label || n.id || '').toString().split('\n')[0];
+    ctx.fillText(label, p.x + 8, p.y + 18);
+
+    lastDrawn.push({ id: n.id, node: n, type: 'node', rect: r });
+  }
+}
+
+function resizeAndRender() {
+  const canvas = $("c");
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = Math.max(1, Math.floor(rect.width));
+  canvas.height = Math.max(1, Math.floor(rect.height));
+  render();
+}
+
+function attachCanvasInteractions() {
+  const canvas = $("c");
+
+  canvas.addEventListener('mousedown', (e) => {
+    view.dragging = true;
+    view.lastX = e.clientX;
+    view.lastY = e.clientY;
+  });
+
+  window.addEventListener('mouseup', () => { view.dragging = false; });
+
+  window.addEventListener('mousemove', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    hoveredNodeId = pickNodeAt(x, y);
+
+    if (view.dragging && (e.buttons & 1)) {
+      const dx = e.clientX - view.lastX;
+      const dy = e.clientY - view.lastY;
+      view.panX += dx;
+      view.panY += dy;
+      view.lastX = e.clientX;
+      view.lastY = e.clientY;
+    }
+
+    render();
+  });
+
+  canvas.addEventListener('click', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const nid = pickNodeAt(x, y);
+    if (nid) {
+      selectedNodeId = nid;
+      updateInspector();
+      render();
+    }
+  });
+
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const delta = Math.sign(e.deltaY);
+    const factor = delta > 0 ? 0.9 : 1.1;
+
+    const rect = canvas.getBoundingClientRect();
+    const sx = e.clientX - rect.left;
+    const sy = e.clientY - rect.top;
+    const before = screenToWorld(sx, sy);
+
+    view.zoom = Math.min(5, Math.max(0.2, view.zoom * factor));
+
+    const after = screenToWorld(sx, sy);
+    view.panX += (after.x - before.x) * view.zoom;
+    view.panY += (after.y - before.y) * view.zoom;
+
+    render();
+  }, { passive:false });
+}
+
+function hookUI() {
+  // mode
+  $("modeBrowse").onclick = () => setMode(Mode.browse);
+  $("modeCompare").onclick = () => setMode(Mode.compare);
+  $("modeReplay").onclick = () => setMode(Mode.replay);
+  $("modeValidate").onclick = () => setMode(Mode.validate);
+
+  // load
+  $("loadOne").onclick = loadOne;
+  $("loadTwo").onclick = loadTwo;
+
+  // tabs
+  $("tabLayers").onclick = () => setTab('layers');
+  $("tabHistory").onclick = () => setTab('history');
+  $("tabFind").onclick = () => setTab('find');
+  $("tabDiag").onclick = () => setTab('diag');
+
+  // layer
+  $("layer").onchange = () => {
+    currentLayerId = $("layer").value;
+    selectedNodeId = null;
+    hoveredNodeId = null;
+    diffCursor = -1;
+    updateInspector();
+    if (bundle) updateHistoryUI();
+    fitToContent();
+    render();
+  };
+
+  // toggles
+  $("toggleGeomBase").onchange = () => render();
+  $("toggleEdges").onchange = () => render();
+  $("toggleIgnoreLayout").onchange = () => { diffCursor = -1; render(); updateInspector(); };
+
+  // diff nav
+  $("nextDiff").onclick = () => gotoDiff(+1);
+  $("prevDiff").onclick = () => gotoDiff(-1);
+
+  // find
+  $("find").oninput = () => updateFind();
+
+  // history
+  $("event").oninput = () => onEventScrub();
+
+  // diagnostics
+  $("runValidate").onclick = () => runValidate();
+
+  // stage toolbar
+  $("zoomIn").onclick = () => { view.zoom = Math.min(5, view.zoom * 1.15); render(); };
+  $("zoomOut").onclick = () => { view.zoom = Math.max(0.2, view.zoom / 1.15); render(); };
+  $("fit").onclick = () => { fitToContent(); render(); };
+  $("reset").onclick = () => { view.panX = 0; view.panY = 0; view.zoom = 1.0; render(); };
+  $("centerSel").onclick = () => {
+    if (!selectedNodeId) return;
+    const n = lastDrawn.find(x => x.id === selectedNodeId);
+    if (n) { centerOnNode(n.node); render(); }
+  };
+
+  // help
+  $("help").onclick = () => $("helpDlg").showModal();
+  $("closeHelp").onclick = () => $("helpDlg").close();
+
+  window.addEventListener('resize', resizeAndRender);
+
+  // keyboard shortcuts
+  window.addEventListener('keydown', (e) => {
+    const isMac = navigator.platform.toLowerCase().includes('mac');
+    const modK = (isMac ? e.metaKey : e.ctrlKey) && e.key.toLowerCase() === 'k';
+    if (modK) {
+      e.preventDefault();
+      setTab('find');
+      $("find").focus();
+      return;
+    }
+
+    if (e.key === '?') { e.preventDefault(); $("helpDlg").showModal(); return; }
+    if (e.key === 'Escape') { selectedNodeId = null; updateInspector(); render(); return; }
+
+    if (e.key.toLowerCase() === 'e') { $("toggleEdges").checked = !$("toggleEdges").checked; render(); return; }
+    if (e.key.toLowerCase() === 'g') { $("toggleGeomBase").checked = !$("toggleGeomBase").checked; render(); return; }
+    if (e.key.toLowerCase() === 'f') { fitToContent(); render(); return; }
+
+    if (mode === Mode.compare) {
+      if (e.key.toLowerCase() === 'n') { gotoDiff(+1); return; }
+      if (e.key.toLowerCase() === 'p') { gotoDiff(-1); return; }
+    }
+
+    if (mode === Mode.replay) {
+      if (e.key === '[') { $("event").value = String(Math.max(0, (+$("event").value||0) - 1)); onEventScrub(); return; }
+      if (e.key === ']') { $("event").value = String(Math.min(+$("event").max||0, (+$("event").value||0) + 1)); onEventScrub(); return; }
+    }
+  });
+}
+
+function init() {
+  hookUI();
+  attachCanvasInteractions();
+  resizeAndRender();
+
+  // Default: load example in browse.
+  setMode(Mode.browse);
+  loadOne();
+
+  // Compare-only UI blocks
+  $("compareOptions").classList.add('hidden');
+  $("compareLegend").classList.add('hidden');
+  $("compareNav").classList.add('hidden');
+
+  // Show compare UI blocks when mode changes.
+  const origSetMode = setMode;
+  setMode = (m) => {
+    origSetMode(m);
+    const on = (m === Mode.compare);
+    $("compareOptions").classList.toggle('hidden', !on);
+    $("compareLegend").classList.toggle('hidden', !on);
+    $("compareNav").classList.toggle('hidden', !on);
+    $("toggleIgnoreLayout").closest('.row').classList.toggle('hidden', !on);
+  };
+}
+
+init();
+</script>
+</body>
+</html>

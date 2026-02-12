@@ -1,0 +1,19 @@
+{
+  "hdVersion": "1",
+  "history": {
+    "file": "build/history.ndjson"
+  },
+  "layers": [
+    {
+      "file": "layers/geometry.canvas.json",
+      "layerId": "geometry"
+    },
+    {
+      "file": "layers/power.canvas.json",
+      "layerId": "power"
+    }
+  ],
+  "project": "infinity-cube",
+  "schemaVersion": "1.0.0"
+}
+

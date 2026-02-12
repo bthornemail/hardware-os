@@ -1,0 +1,15 @@
+{
+  "edges": [],
+  "nodes": [
+    {
+      "height": 180,
+      "id": "edge0",
+      "text": "edge0\nTest Edge",
+      "type": "text",
+      "width": 320,
+      "x": 0,
+      "y": 0
+    }
+  ]
+}
+

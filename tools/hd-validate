@@ -1,0 +1,22 @@
+#!/usr/bin/env python3
+"""
+Compatibility entrypoint for the "hd-validate" command mentioned in chat_history.md.
+"""
+
+import os
+import sys
+from pathlib import Path
+
+
+def main() -> int:
+    here = Path(__file__).resolve()
+    hd = here.parent / "hd"
+
+    # Forward as: hd validate <args...>
+    argv = [sys.executable, str(hd), "validate", *sys.argv[1:]]
+    return os.spawnv(os.P_WAIT, sys.executable, argv)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+

@@ -1,0 +1,15 @@
+{
+  "edges": [],
+  "nodes": [
+    {
+      "height": 180,
+      "id": "edge0",
+      "text": "Power spec for edge0",
+      "type": "text",
+      "width": 320,
+      "x": 360,
+      "y": 0
+    }
+  ]
+}
+

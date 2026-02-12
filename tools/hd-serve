@@ -1,0 +1,193 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import json
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
+import sys
+import subprocess
+from urllib.parse import urlparse, parse_qs
+
+ROOT = Path(__file__).resolve().parent.parent
+SAFE_MODE = False
+
+
+def read_json(p: Path):
+    with p.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def read_history_ndjson(p: Path):
+    events = []
+    if not p.exists():
+        return events
+    with p.open("r", encoding="utf-8") as f:
+        for line in f:
+            s = line.strip()
+            if s:
+                events.append(json.loads(s))
+    return events
+
+
+def project_bundle(project_dir: Path):
+    manifest_path = project_dir / "manifest.json"
+    manifest = read_json(manifest_path)
+
+    layers = {}
+    for ent in manifest.get("layers", []):
+        lid = ent["layerId"]
+        layers[lid] = read_json(project_dir / ent["file"])
+
+    history = []
+    hist = manifest.get("history", {})
+    hist_file = hist.get("file")
+    if isinstance(hist_file, str) and hist_file:
+        history = read_history_ndjson(project_dir / hist_file)
+
+    return {"projectDir": str(project_dir), "manifest": manifest, "layers": layers, "history": history}
+
+
+def _run_hd_validate(target: Path, strict: bool = False) -> dict:
+    hd = ROOT / "tools" / "hd"
+    cmd = [sys.executable, str(hd), "validate", str(target), "--format=json"]
+    if strict:
+        cmd.append("--strict")
+    p = subprocess.run(cmd, capture_output=True, text=True)
+    out = p.stdout.strip()
+    issues = None
+    try:
+        issues = json.loads(out) if out else []
+    except Exception:
+        issues = None
+    return {
+        "ok": p.returncode == 0,
+        "exitCode": p.returncode,
+        "issues": issues,
+        "stdout": p.stdout,
+        "stderr": p.stderr,
+        "strict": strict,
+    }
+
+
+class Handler(BaseHTTPRequestHandler):
+    # Serve viewer files from /viewer/*
+    def do_GET(self):
+        u = urlparse(self.path)
+        path = u.path
+
+        if path == "/" or path == "/viewer" or path == "/viewer/":
+            return self._serve_file(ROOT / "viewer" / "index.html", "text/html; charset=utf-8")
+
+        if path.startswith("/viewer/"):
+            # Prevent path traversal: keep all viewer reads under ROOT/viewer.
+            rel = Path(path[len("/viewer/"):])
+            file_path = (ROOT / "viewer" / rel).resolve()
+            viewer_root = (ROOT / "viewer").resolve()
+            if viewer_root not in file_path.parents and file_path != viewer_root:
+                self.send_response(403)
+                self.end_headers()
+                self.wfile.write(b"forbidden")
+                return
+            if file_path.is_dir():
+                file_path = file_path / "index.html"
+            return self._serve_static(file_path)
+
+        if path == "/api/bundle":
+            qs = parse_qs(u.query)
+            proj = (qs.get("project") or ["examples/infinity-cube"])[0]
+            project_dir = (ROOT / proj).resolve()
+            if SAFE_MODE:
+                rr = ROOT.resolve()
+                if project_dir != rr and rr not in project_dir.parents:
+                    return self._json({"error": "safe mode: project must be under repo root"}, code=403)
+            if not project_dir.exists() or not project_dir.is_dir():
+                return self._json({"error": f"project not found: {proj}"}, code=404)
+            try:
+                bundle = project_bundle(project_dir)
+            except Exception as e:
+                return self._json({"error": f"failed to load project: {e}"}, code=500)
+            return self._json(bundle)
+
+        if path == "/api/validate":
+            qs = parse_qs(u.query)
+            proj = (qs.get("project") or ["examples/infinity-cube"])[0]
+            strict = (qs.get("strict") or ["0"])[0].strip().lower() in ("1", "true", "yes")
+            target = (ROOT / proj).resolve()
+            if SAFE_MODE:
+                rr = ROOT.resolve()
+                if target != rr and rr not in target.parents:
+                    return self._json({"error": "safe mode: target must be under repo root"}, code=403)
+            if not target.exists():
+                return self._json({"error": f"target not found: {proj}"}, code=404)
+            try:
+                res = _run_hd_validate(target=target, strict=strict)
+            except Exception as e:
+                return self._json({"error": f"validate failed: {e}"}, code=500)
+            return self._json(res)
+
+        self.send_response(404)
+        self.end_headers()
+        self.wfile.write(b"not found")
+
+    def _serve_static(self, file_path: Path):
+        if not file_path.exists() or not file_path.is_file():
+            self.send_response(404)
+            self.end_headers()
+            self.wfile.write(b"not found")
+            return
+
+        # minimal content-type mapping
+        ext = file_path.suffix.lower()
+        ctype = {
+            ".html": "text/html; charset=utf-8",
+            ".js": "text/javascript; charset=utf-8",
+            ".css": "text/css; charset=utf-8",
+            ".json": "application/json; charset=utf-8",
+            ".svg": "image/svg+xml",
+            ".png": "image/png",
+        }.get(ext, "application/octet-stream")
+        return self._serve_file(file_path, ctype)
+
+    def _serve_file(self, file_path: Path, content_type: str):
+        data = file_path.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _json(self, obj, code=200):
+        data = json.dumps(obj, indent=2, sort_keys=True).encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="hd-serve", description="Serve the Hardware-OS viewer")
+    ap.add_argument("--host", default="127.0.0.1")
+    ap.add_argument("--port", type=int, default=8787)
+    ap.add_argument(
+        "--safe",
+        action="store_true",
+        help="Restrict /api/bundle and /api/validate targets to paths under repo root",
+    )
+    args = ap.parse_args()
+
+    global SAFE_MODE
+    SAFE_MODE = bool(args.safe)
+
+    server = HTTPServer((args.host, args.port), Handler)
+    print("WARNING: hd-serve is intended for local debugging only; do not expose to untrusted networks.", file=sys.stderr)
+    if SAFE_MODE:
+        print("Safe mode enabled: targets must be under repo root.", file=sys.stderr)
+    print(f"Viewer: http://{args.host}:{args.port}/viewer/")
+    print(f"API:    http://{args.host}:{args.port}/api/bundle?project=examples/infinity-cube")
+    server.serve_forever()
+
+
+if __name__ == "__main__":
+    main()
