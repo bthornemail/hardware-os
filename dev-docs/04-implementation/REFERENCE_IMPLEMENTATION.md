@@ -10,10 +10,10 @@ This document specifies the **reference implementation behavior** for Hardware-O
 **Key principle**: the reference implementation is minimal and deterministic. It defines *kernel behavior* and the *inspector adapter* interface used by the viewer.
 
 Related docs:
-- `RFC-0001-hardware-os-core.md`
-- `RFC-0002-inspector-protocol.md`
-- `SPECIFICATION.md` (hash canonicalization freeze)
-- `KERNEL.md` (human-readable kernel contract)
+- `../03-rfcs/RFC-0001-hardware-os-core.md`
+- `../03-rfcs/RFC-0002-inspector-protocol.md`
+- `../02-specification/SPECIFICATION.md` (hash canonicalization freeze)
+- `../01-foundations/KERNEL.md` (human-readable kernel contract)
 
 ## 1. Scope
 
@@ -45,8 +45,12 @@ The reference implementation assumes the following paths exist:
 - Schemas (optional best-effort):
   - `schemas/kernel/manifest-schema.json`
 - Docs:
-  - `README.md`, `ARCHITECTURE.md`, `KERNEL.md`, `INSPECTOR.md`, `DEMO_SUITE.md`, `SECURITY.md`, `ROADMAP.md`
-  - RFCs: `RFC-0001-*.md` etc.
+  - `README.md`, `dev-docs/README.md`
+  - `dev-docs/01-foundations/*.md`
+  - `dev-docs/02-specification/*.md`
+  - `dev-docs/03-rfcs/RFC-*.md`
+  - `dev-docs/04-implementation/*.md`
+  - `dev-docs/05-governance-planning/*.md`
 - Example:
   - `examples/infinity-cube/manifest.json`
   - `examples/infinity-cube/layers/*.canvas.json`

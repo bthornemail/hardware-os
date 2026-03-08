@@ -42,14 +42,14 @@ tools/hd-serve --safe
 
 ## Docs
 
-- `ARCHITECTURE.md`: system model and boundaries
-- `KERNEL.md`: kernel contract for `tools/hd`
-- `INSPECTOR.md`: inspector behavior and semantics
-- `DEMO_SUITE.md`: demo harness and what it proves
-- `SECURITY.md`: trust boundaries and non-goals
-- `ROADMAP.md`: next work
-- `SPECIFICATION.md`: frozen hash canonicalization rules and notes
-- `chat_history.md`: canonical captured source material for the spec
+- `docs/README.md`: contributor and maintainer implementation docs (actual functionality)
+- `dev-docs/README.md`: canonical dev-docs index and reading order
+- `dev-docs/01-foundations/`: architecture, kernel, inspector, security
+- `dev-docs/02-specification/`: semantic and formal specifications
+- `dev-docs/03-rfcs/`: RFC series (`RFC-0001` through `RFC-0010`)
+- `dev-docs/04-implementation/`: implementation and reference behavior docs
+- `dev-docs/05-governance-planning/`: manifesto, governance, roadmap/plans
+- `dev-docs/99-archive/`: historical transcript archive (non-canonical)
 
 ## Also In This Repo
 

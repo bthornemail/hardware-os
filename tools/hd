@@ -3,7 +3,7 @@
 hd: minimal Hardware-OS CLI.
 
 Implements a small, dependency-light subset of the workflow documented in
-chat_history.md:
+dev-docs/README.md and dev-docs/99-archive/chat_history.md:
   - hd init <dir>
   - hd validate <manifest.json|project_dir>
 

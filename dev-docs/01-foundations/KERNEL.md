@@ -75,7 +75,7 @@ The kernel verifies:
 - `prev_hash` equals the previous event's `hash`.
 - `hash` equals SHA256 of a canonical JSON encoding of the event with the `hash` field removed.
 
-The canonicalization rules are frozen in `SPECIFICATION.md`.
+The canonicalization rules are frozen in `../02-specification/SPECIFICATION.md`.
 
 ## Commands
 

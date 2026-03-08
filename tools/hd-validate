@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Compatibility entrypoint for the "hd-validate" command mentioned in chat_history.md.
+Compatibility entrypoint for the "hd-validate" command documented in dev docs.
 """
 
 import os
@@ -19,4 +19,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

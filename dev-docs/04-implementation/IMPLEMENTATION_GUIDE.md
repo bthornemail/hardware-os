@@ -3,7 +3,7 @@
 Status: Draft  
 Version: 1.0  
 Audience: Engineers implementing a compatible Hardware-OS kernel or inspector  
-Depends on: RFC-0001 through RFC-0006, `REFERENCE_IMPLEMENTATION.md`
+Depends on: `../03-rfcs/RFC-0001-hardware-os-core.md` through `../03-rfcs/RFC-0006-distributed-sync-protocol.md`, `REFERENCE_IMPLEMENTATION.md`
 
 This document explains how to implement a compatible Hardware-OS system from scratch.
 
@@ -337,4 +337,3 @@ If your implementation preserves:
 then you are compatible.
 
 Everything else is optional.
-

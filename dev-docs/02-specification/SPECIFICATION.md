@@ -1,6 +1,6 @@
 # Hardware-OS (Working Notes)
 
-The canonical "documented hardware-os" text for this repo currently lives in `chat_history.md`.
+The canonical development documentation for this repository lives in the structured `dev-docs/` set, indexed in `dev-docs/README.md`.
 
 This repository implements a minimal, dependency-light subset:
 - A manifest (`manifest.json`) referencing layer files (`*.canvas.json`) and optional history (`*.ndjson`)
@@ -13,9 +13,9 @@ This repository implements a minimal, dependency-light subset:
 
 See `tools/hd` for the source-of-truth behavior.
 
-## Canonical Chat History Location
+## Canonical Documentation Source
 
-Rule: `chat_history.md` at repo root is canonical. Any other path is an alias and MUST NOT be treated as source of truth.
+Rule: docs in `dev-docs/01-foundations` through `dev-docs/05-governance-planning` are canonical. Historical transcripts in `dev-docs/99-archive` are non-canonical provenance only.
 
 ## Event Hash Canonicalization (History)
 

@@ -2,6 +2,6 @@
 
 This is a compatibility alias.
 
-Canonical file: `../chat_history.md`
+Archived file: `../dev-docs/99-archive/chat_history.md`
 
-Do not edit this copy.
+This file is non-canonical and kept for compatibility references.

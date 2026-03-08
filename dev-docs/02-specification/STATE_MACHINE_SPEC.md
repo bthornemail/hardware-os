@@ -3,7 +3,7 @@
 Status: Draft  
 Version: 1.0  
 Last Updated: 2026-02-08  
-Depends on: RFC-0001, `SPECIFICATION.md`, `REFERENCE_IMPLEMENTATION.md`
+Depends on: `../03-rfcs/RFC-0001-hardware-os-core.md`, `SPECIFICATION.md`, `../04-implementation/REFERENCE_IMPLEMENTATION.md`
 
 This document formalizes the Hardware-OS kernel as a deterministic
 state transition system. It defines the semantics for manifest/layer/history
@@ -401,4 +401,3 @@ An implementation conforms to this state machine spec if:
 - replay digest matches §7
 
 Given the same project directory contents, two conforming implementations MUST output identical replay digests.
-
